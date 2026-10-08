@@ -1,0 +1,28 @@
+diff --git a/core/java/android/view/Choreographer.java b/core/java/android/view/Choreographer.java
+index 37782ac7f2f2..0921bcb1fceb 100644
+--- a/core/java/android/view/Choreographer.java
++++ b/core/java/android/view/Choreographer.java
+@@ -1083,6 +1083,23 @@ public final class Choreographer {
+                         long lastFrameOffset = jitterNanos % frameIntervalNanos;
+                         frameTimeNanos = frameTimeNanos - lastFrameOffset;
+                         final long skippedFrames = jitterNanos / frameIntervalNanos;
++                        // MUST_JANK_PROBE_V1_BEGIN
++                        // Observe Java UI-thread doFrame start delay; not total display jank.
++                        if (skippedFrames >= 1
++                                && android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
++                                && Log.isLoggable("MUST_JankMonitor", Log.INFO)) {
++                            final String mustProcessName = android.app.ActivityThread.currentProcessName();
++                            Log.i("MUST_JankMonitor",
++                                    "probe=v1 metric=doFrame_start_delay"
++                                    + " process=" + (mustProcessName != null ? mustProcessName : "unknown")
++                                    + " pid=" + android.os.Process.myPid()
++                                    + " tid=" + android.os.Process.myTid()
++                                    + " t_ns=" + startNanos
++                                    + " skipped=" + skippedFrames
++                                    + " jitter_ns=" + jitterNanos
++                                    + " interval_ns=" + frameIntervalNanos);
++                        }
++                        // MUST_JANK_PROBE_V1_END
+                         if (skippedFrames >= SKIPPED_FRAME_WARNING_LIMIT) {
+                             Log.i(TAG, "Skipped " + skippedFrames + " frames!  "
+                                     + "The application may be doing too much work on its main "
