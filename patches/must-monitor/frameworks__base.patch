@@ -1,0 +1,469 @@
+diff --git a/services/core/java/com/android/server/jank/JankMonitorService.java b/services/core/java/com/android/server/jank/JankMonitorService.java
+new file mode 100644
+index 000000000000..a89d7b683559
+--- /dev/null
++++ b/services/core/java/com/android/server/jank/JankMonitorService.java
+@@ -0,0 +1,229 @@
++package com.android.server.jank;
++
++import android.content.Context;
++import android.os.Binder;
++import android.os.Handler;
++import android.os.IBinder;
++import android.os.Looper;
++import android.os.Parcel;
++import android.os.Process;
++import android.os.ResultReceiver;
++import android.os.ShellCallback;
++import android.os.ShellCommand;
++import android.os.ServiceManager;
++import android.os.SystemClock;
++import android.util.Slog;
++
++import com.android.server.LocalServices;
++import com.android.server.SystemService;
++import com.android.server.wm.ActivityTaskManagerInternal;
++import com.android.server.wm.ActivityAssistInfo;
++import com.android.server.wm.WindowManagerService;
++
++import java.io.FileDescriptor;
++import java.io.PrintWriter;
++import java.util.Locale;
++import java.util.UUID;
++
++/** Controls a continuous system-wide FrameTimeline monitoring session. */
++public final class JankMonitorService extends SystemService {
++    private static final String SERVICE = "must_jank";
++    private static final int SF_TRANSACTION = 1050;
++    private static final String SF_DESCRIPTOR = "android.ui.ISurfaceComposer";
++    private static volatile JankMonitorService sInstance;
++
++    private enum State { STOPPED, STARTING, RUNNING, STOPPING }
++
++    private final Handler mHandler = new Handler(Looper.getMainLooper());
++    private final JankSceneTracker mScenes;
++    private final IBinder mBinder = new MonitorBinder();
++    private final Runnable mPeriodicStats = new Runnable() {
++        @Override public void run() {
++            if (mState != State.RUNNING) return;
++            try {
++                Slog.i("MUST_JANK_STATS", "session=" + mSession + " ts_ns="
++                        + SystemClock.elapsedRealtimeNanos() + " " + surfaceFlinger(2, null));
++            } catch (RuntimeException e) {
++                Slog.w("MUST_JANK_STATS", "session=" + mSession + " error=sf_unavailable");
++            }
++            mHandler.postDelayed(this, 5000);
++        }
++    };
++
++    private volatile State mState = State.STOPPED;
++    private String mSession = "";
++    private long mStartNs;
++    private String mLastStats = "total_frames=0 janky_frames=0";
++    private WindowManagerService mWindowManager;
++    private ActivityTaskManagerInternal mAtm;
++
++    public JankMonitorService(Context context) {
++        super(context);
++        mScenes = new JankSceneTracker(context);
++        sInstance = this;
++    }
++
++    @Override public void onStart() {
++        publishBinderService(SERVICE, mBinder);
++    }
++
++    /** Called once after WindowManager is initialized by SystemServer. */
++    public void attachWindowManager(WindowManagerService windowManager) {
++        mWindowManager = windowManager;
++        mAtm = LocalServices.getService(ActivityTaskManagerInternal.class);
++    }
++
++    /** Posted from WindowManager only when the focused task changes. */
++    public static void onFocusedAppChanged(String from, String to, int displayId) {
++        final JankMonitorService service = sInstance;
++        if (service != null && service.mState == State.RUNNING) {
++            service.mScenes.onFocusChanged(from, to, displayId);
++        }
++    }
++
++    private static String surfaceFlinger(int operation, String session) {
++        final IBinder binder = ServiceManager.getService("SurfaceFlinger");
++        if (binder == null) throw new IllegalStateException("SurfaceFlinger unavailable");
++        final Parcel request = Parcel.obtain();
++        final Parcel reply = Parcel.obtain();
++        try {
++            request.writeInterfaceToken(SF_DESCRIPTOR);
++            request.writeInt(operation);
++            if (operation == 1) request.writeString(session);
++            if (!binder.transact(SF_TRANSACTION, request, reply, 0)) {
++                throw new IllegalStateException("SurfaceFlinger rejected monitor transaction");
++            }
++            return reply.readString();
++        } catch (android.os.RemoteException e) {
++            throw new IllegalStateException(e);
++        } finally {
++            request.recycle();
++            reply.recycle();
++        }
++    }
++
++    private synchronized String start() {
++        if (mState != State.STOPPED) return status();
++        if (mWindowManager == null || mAtm == null) return "error=services_not_ready";
++        mState = State.STARTING;
++        final String session = Long.toString(SystemClock.elapsedRealtimeNanos(), 36) + "_"
++                + UUID.randomUUID().toString().substring(0, 8);
++        try {
++            mStartNs = SystemClock.elapsedRealtimeNanos();
++            surfaceFlinger(1, session);
++            mSession = session;
++            final java.util.List<ActivityAssistInfo> visible = mAtm.getTopVisibleActivities(0);
++            final String focused = visible.isEmpty() ? null
++                    : visible.get(0).getComponentName().getPackageName();
++            mScenes.start(session, focused);
++            mWindowManager.registerPointerEventListener(mScenes, 0);
++            mAtm.getLaunchObserverRegistry().registerLaunchObserver(mScenes);
++            mState = State.RUNNING;
++            Slog.i("MUST_JANK_SESSION", "event=START session=" + session + " ts_ns="
++                    + mStartNs + " state=RUNNING");
++            mHandler.postDelayed(mPeriodicStats, 5000);
++            return status();
++        } catch (RuntimeException e) {
++            try { mWindowManager.unregisterPointerEventListener(mScenes, 0); }
++            catch (RuntimeException ignored) { }
++            try { mAtm.getLaunchObserverRegistry().unregisterLaunchObserver(mScenes); }
++            catch (RuntimeException ignored) { }
++            try { surfaceFlinger(0, null); }
++            catch (RuntimeException ignored) { }
++            mScenes.stop();
++            mState = State.STOPPED;
++            return "error=" + e.getClass().getSimpleName() + " message=" + e.getMessage();
++        }
++    }
++
++    private synchronized String stop() {
++        if (mState == State.STOPPED) return status();
++        if (mState != State.RUNNING) return "error=busy state=" + mState;
++        mState = State.STOPPING;
++        mHandler.removeCallbacks(mPeriodicStats);
++        try {
++            mLastStats = surfaceFlinger(2, null);
++        } catch (RuntimeException e) {
++            mLastStats = "quality=PARTIAL reason=sf_stats_unavailable";
++        }
++        try {
++            surfaceFlinger(0, null);
++        } catch (RuntimeException e) {
++            mState = State.RUNNING;
++            mHandler.postDelayed(mPeriodicStats, 5000);
++            return "error=sf_stop_failed state=RUNNING";
++        }
++        mWindowManager.unregisterPointerEventListener(mScenes, 0);
++        mAtm.getLaunchObserverRegistry().unregisterLaunchObserver(mScenes);
++        mScenes.stop();
++        final long end = SystemClock.elapsedRealtimeNanos();
++        Slog.i("MUST_JANK_STATS", "session=" + mSession + " ts_ns=" + end
++                + " final=1 " + mLastStats);
++        Slog.i("MUST_JANK_SESSION", "event=STOP session=" + mSession + " ts_ns="
++                + end + " duration_ns=" + (end - mStartNs) + " state=STOPPED");
++        mState = State.STOPPED;
++        return "session=" + mSession + " state=STOPPED " + mLastStats;
++    }
++
++    private synchronized String status() {
++        return "session=" + (mSession.isEmpty() ? "none" : mSession) + " state=" + mState;
++    }
++
++    private synchronized String stats() {
++        if (mState == State.RUNNING) {
++            try { return surfaceFlinger(2, null); }
++            catch (RuntimeException e) { return "quality=PARTIAL reason=sf_stats_unavailable"; }
++        }
++        return mLastStats;
++    }
++
++    private final class MonitorBinder extends Binder {
++        private void checkCaller() {
++            final int uid = Binder.getCallingUid();
++            if (uid != Process.SHELL_UID && uid != Process.ROOT_UID
++                    && uid != Process.SYSTEM_UID) {
++                throw new SecurityException("must_jank is restricted to shell/system");
++            }
++        }
++
++        @Override protected void dump(FileDescriptor fd, PrintWriter writer, String[] args) {
++            checkCaller();
++            writer.println("MUST Jank Monitor");
++            writer.println(status());
++            writer.println("elapsed_ns=" + (mState == State.RUNNING
++                    ? SystemClock.elapsedRealtimeNanos() - mStartNs : 0));
++            writer.println(stats());
++            writer.println(mScenes.dump());
++            writer.println("jank_by_scene=PC_CORRELATION_REQUIRED");
++        }
++
++        @Override public void onShellCommand(FileDescriptor in, FileDescriptor out,
++                FileDescriptor err, String[] args, ShellCallback callback,
++                ResultReceiver resultReceiver) {
++            checkCaller();
++            new ShellCommand() {
++                @Override public int onCommand(String cmd) {
++                    final PrintWriter writer = getOutPrintWriter();
++                    switch (cmd == null ? "" : cmd.toLowerCase(Locale.ROOT)) {
++                        case "start": {
++                            final String result = start();
++                            writer.println(result);
++                            return result.startsWith("error=") ? 1 : 0;
++                        }
++                        case "stop": {
++                            final String result = stop();
++                            writer.println(result);
++                            return result.startsWith("error=") ? 1 : 0;
++                        }
++                        case "status": writer.println(status()); return 0;
++                        case "stats": writer.println(stats()); return 0;
++                        default: return handleDefaultCommands(cmd);
++                    }
++                }
++                @Override public void onHelp() {
++                    getOutPrintWriter().println("must_jank start|stop|status|stats");
++                }
++            }.exec(this, in, out, err, args, callback, resultReceiver);
++        }
++    }
++}
+diff --git a/services/core/java/com/android/server/jank/JankSceneTracker.java b/services/core/java/com/android/server/jank/JankSceneTracker.java
+new file mode 100644
+index 000000000000..00d9af45c9f3
+--- /dev/null
++++ b/services/core/java/com/android/server/jank/JankSceneTracker.java
+@@ -0,0 +1,187 @@
++package com.android.server.jank;
++
++import android.content.ComponentName;
++import android.content.Context;
++import android.os.Handler;
++import android.os.Looper;
++import android.os.SystemClock;
++import android.util.ArrayMap;
++import android.util.Slog;
++import android.view.MotionEvent;
++import android.view.VelocityTracker;
++import android.view.ViewConfiguration;
++import android.view.WindowManagerPolicyConstants.PointerEventListener;
++
++import com.android.server.wm.ActivityMetricsLaunchObserver;
++
++import java.util.ArrayList;
++
++/** Emits interaction intervals. Frame ownership is deliberately left to SurfaceFlinger. */
++final class JankSceneTracker extends ActivityMetricsLaunchObserver
++        implements PointerEventListener {
++    private static final String TAG = "MUST_SCENE";
++    private final Handler mHandler = new Handler(Looper.getMainLooper());
++    private final int mTouchThresholdPx;
++    private final ArrayMap<Long, Scene> mActive = new ArrayMap<>();
++    private final ArrayMap<Long, Long> mLaunches = new ArrayMap<>();
++    private String mSession;
++    private String mFocusedPackage;
++    private long mNextId;
++    private long mTouchScene;
++    private float mDownX;
++    private float mDownY;
++    private int mMoveCount;
++    private VelocityTracker mVelocity;
++
++    JankSceneTracker(Context context) {
++        mTouchThresholdPx = Math.max(24,
++                ViewConfiguration.get(context).getScaledTouchSlop() * 2);
++    }
++
++    private static final class Scene {
++        final long id;
++        final String name;
++        final String detail;
++        final long startNs;
++        Scene(long id, String name, String detail, long startNs) {
++            this.id = id;
++            this.name = name;
++            this.detail = detail;
++            this.startNs = startNs;
++        }
++    }
++
++    synchronized void start(String session, String focusedPackage) {
++        mActive.clear();
++        mLaunches.clear();
++        mNextId = 0;
++        mTouchScene = 0;
++        mSession = session;
++        mFocusedPackage = focusedPackage;
++        Slog.i(TAG, "event=CONTEXT session=" + session + " ts_ns="
++                + SystemClock.elapsedRealtimeNanos() + " foreground=" + safe(focusedPackage));
++    }
++
++    synchronized void stop() {
++        if (mSession == null) return;
++        for (Scene scene : new ArrayList<>(mActive.values())) end(scene.id);
++        mSession = null;
++        mLaunches.clear();
++        mTouchScene = 0;
++        if (mVelocity != null) { mVelocity.recycle(); mVelocity = null; }
++    }
++
++    synchronized String dump() {
++        final StringBuilder active = new StringBuilder();
++        for (Scene scene : mActive.values()) {
++            if (active.length() > 0) active.append(',');
++            active.append(scene.name);
++        }
++        return "active_scenes=" + (active.length() == 0 ? "UNKNOWN" : active)
++                + " foreground=" + safe(mFocusedPackage);
++    }
++
++    private static String safe(String text) {
++        if (text == null || text.isEmpty()) return "unknown";
++        return text.replaceAll("[^A-Za-z0-9._/-]", "_");
++    }
++
++    private long begin(String name, String detail, String confidence) {
++        if (mSession == null) return 0;
++        final long id = ++mNextId;
++        final long now = SystemClock.elapsedRealtimeNanos();
++        mActive.put(id, new Scene(id, name, detail, now));
++        Slog.i(TAG, "event=BEGIN session=" + mSession + " scene_id=" + id + " scene="
++                + name + " ts_ns=" + now + " confidence=" + confidence + " " + detail);
++        return id;
++    }
++
++    private void end(long id) {
++        final Scene scene = mActive.remove(id);
++        if (scene == null || mSession == null) return;
++        final long now = SystemClock.elapsedRealtimeNanos();
++        Slog.i(TAG, "event=END session=" + mSession + " scene_id=" + id + " scene="
++                + scene.name + " ts_ns=" + now + " duration_ns="
++                + (now - scene.startNs) + " " + scene.detail);
++    }
++
++    synchronized void onFocusChanged(String from, String to, int displayId) {
++        if (mSession == null) return;
++        if (mTouchScene != 0) {
++            end(mTouchScene);
++            mTouchScene = 0;
++            if (mVelocity != null) { mVelocity.recycle(); mVelocity = null; }
++        }
++        mFocusedPackage = to;
++        if (from == null || to == null || from.equals(to)) return;
++        final long id = begin("APP_SWITCH", "from=" + safe(from) + " to=" + safe(to)
++                + " display_id=" + displayId, "MEDIUM");
++        mHandler.postDelayed(() -> { synchronized (JankSceneTracker.this) { end(id); } }, 500);
++    }
++
++    @Override public synchronized void onActivityLaunched(long launchId, ComponentName name,
++            int temperature, String processName, int uid) {
++        if (mSession == null || name == null) return;
++        if (name.getPackageName().equals(mFocusedPackage)) return;
++        final String subtype = temperature == TEMPERATURE_COLD ? "COLD_START"
++                : temperature == TEMPERATURE_WARM ? "WARM_START" : "HOT_START";
++        final long id = begin("APP_LAUNCH", "package=" + safe(name.getPackageName())
++                + " subscene=" + subtype + " owner_uid=" + uid, "HIGH");
++        mLaunches.put(launchId, id);
++    }
++
++    @Override public synchronized void onActivityLaunchFinished(long launchId,
++            ComponentName name, long timestampNanos, int launchMode) {
++        final Long id = mLaunches.remove(launchId);
++        if (id != null) end(id);
++    }
++
++    @Override public synchronized void onActivityLaunchCancelled(long launchId) {
++        final Long id = mLaunches.remove(launchId);
++        if (id != null) end(id);
++    }
++
++    @Override public synchronized void onPointerEvent(MotionEvent event) {
++        if (mSession == null) return;
++        switch (event.getActionMasked()) {
++            case MotionEvent.ACTION_DOWN:
++                mDownX = event.getX(); mDownY = event.getY(); mMoveCount = 0;
++                if (mVelocity != null) mVelocity.recycle();
++                mVelocity = VelocityTracker.obtain();
++                mVelocity.addMovement(event);
++                break;
++            case MotionEvent.ACTION_MOVE:
++                if (mVelocity != null) mVelocity.addMovement(event);
++                final float dx = event.getX() - mDownX;
++                final float dy = event.getY() - mDownY;
++                if (dx * dx + dy * dy > mTouchThresholdPx * mTouchThresholdPx) ++mMoveCount;
++                if (mTouchScene == 0 && mMoveCount >= 2) {
++                    mTouchScene = begin("SCROLL_TOUCH", "package=" + safe(mFocusedPackage)
++                            + " source=pointer_motion", "MEDIUM");
++                }
++                break;
++            case MotionEvent.ACTION_UP:
++            case MotionEvent.ACTION_CANCEL:
++                if (mVelocity != null) {
++                    mVelocity.addMovement(event);
++                    mVelocity.computeCurrentVelocity(1000);
++                }
++                final boolean flingGesture = event.getActionMasked() == MotionEvent.ACTION_UP
++                        && mTouchScene != 0 && mVelocity != null
++                        && Math.hypot(mVelocity.getXVelocity(), mVelocity.getYVelocity()) > 1200;
++                end(mTouchScene);
++                mTouchScene = 0;
++                if (flingGesture) {
++                    // Gesture velocity is evidence of a fling request, not proof the app scrolled.
++                    final long id = begin("SCROLL_FLING", "package=" + safe(mFocusedPackage)
++                            + " source=velocity_inference", "LOW");
++                    mHandler.postDelayed(
++                            () -> { synchronized (JankSceneTracker.this) { end(id); } }, 700);
++                }
++                if (mVelocity != null) { mVelocity.recycle(); mVelocity = null; }
++                break;
++            default:
++                break;
++        }
++    }
++}
+diff --git a/services/core/java/com/android/server/wm/DisplayContent.java b/services/core/java/com/android/server/wm/DisplayContent.java
+index 27427724f0c3..ac84e4449c28 100644
+--- a/services/core/java/com/android/server/wm/DisplayContent.java
++++ b/services/core/java/com/android/server/wm/DisplayContent.java
+@@ -4136,6 +4136,11 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
+                 newFocus, getDisplayId(), Debug.getCallers(4));
+         final Task oldTask = mFocusedApp != null ? mFocusedApp.getTask() : null;
+         final Task newTask = newFocus != null ? newFocus.getTask() : null;
++        if (oldTask != newTask) {
++            com.android.server.jank.JankMonitorService.onFocusedAppChanged(
++                    mFocusedApp != null ? mFocusedApp.packageName : null,
++                    newFocus != null ? newFocus.packageName : null, getDisplayId());
++        }
+         mFocusedApp = newFocus;
+         if (oldTask != newTask) {
+             if (oldTask != null) oldTask.onAppFocusChanged(false);
+diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
+index a184d6a7efe8..0557e77bac8b 100644
+--- a/services/java/com/android/server/SystemServer.java
++++ b/services/java/com/android/server/SystemServer.java
+@@ -315,6 +315,7 @@ import com.android.server.webkit.WebViewUpdateService;
+ import com.android.server.wm.ActivityTaskManagerService;
+ import com.android.server.wm.WindowManagerGlobalLock;
+ import com.android.server.wm.WindowManagerService;
++import com.android.server.jank.JankMonitorService;
+ 
+ import dalvik.system.VMDebug;
+ import dalvik.system.VMRuntime;
+@@ -1740,6 +1741,12 @@ public final class SystemServer implements Dumpable {
+             wm.onInitReady();
+             t.traceEnd();
+ 
++            t.traceBegin("StartMustJankMonitor");
++            final JankMonitorService jankMonitor =
++                    mSystemServiceManager.startService(JankMonitorService.class);
++            jankMonitor.attachWindowManager(wm);
++            t.traceEnd();
++
+             // Start receiving calls from SensorManager services. Start in a separate thread
+             // because it need to connect to SensorManager. This has to start
+             // after PHASE_WAIT_FOR_SENSOR_SERVICE is done.

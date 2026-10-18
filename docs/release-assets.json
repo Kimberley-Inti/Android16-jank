@@ -1,0 +1,85 @@
+{
+  "tag": "must-jank-2026.10.18",
+  "device": "salami",
+  "firmware_date": "2026-10-15",
+  "pc_source_date": "2026-10-18",
+  "rom": {
+    "name": "lineage-23.2-20261015-UNOFFICIAL-salami.zip",
+    "size": 2175603032,
+    "sha256": "042544561c6fbeaab3da37bbdd17c635ed6882e68728513f12adb756aa698270",
+    "parts": [
+      {
+        "name": "lineage-23.2-20261015-UNOFFICIAL-salami.zip.part.001",
+        "size": 1992294400,
+        "sha256": "29cee1db25b7119d34e1d1cd50549e1a6c925d83e2244aaa62044ac38d53d087"
+      },
+      {
+        "name": "lineage-23.2-20261015-UNOFFICIAL-salami.zip.part.002",
+        "size": 183308632,
+        "sha256": "9ad7072c0441d85b0736ef00abeeb1b2c7dd7e3db483b79babcd20849cefee66"
+      }
+    ]
+  },
+  "assets": [
+    {
+      "name": "lineage-23.2-20261015-UNOFFICIAL-salami.zip.part.001",
+      "size": 1992294400,
+      "sha256": "29cee1db25b7119d34e1d1cd50549e1a6c925d83e2244aaa62044ac38d53d087"
+    },
+    {
+      "name": "lineage-23.2-20261015-UNOFFICIAL-salami.zip.part.002",
+      "size": 183308632,
+      "sha256": "9ad7072c0441d85b0736ef00abeeb1b2c7dd7e3db483b79babcd20849cefee66"
+    },
+    {
+      "name": "boot.img",
+      "size": 201326592,
+      "sha256": "3e1c64425ba0e1f094eaf23818fd452aa63cf81d627e0b45c1abfc59234822e5"
+    },
+    {
+      "name": "dtbo.img",
+      "size": 25165824,
+      "sha256": "232f211252a66b1f7eb89e88c008e23a7ac85c49615ef2587a5d8df416f42660"
+    },
+    {
+      "name": "init_boot.img",
+      "size": 8388608,
+      "sha256": "f62feebd14ace5a381c46c721e9682adb87441dcb5c050ce83bd699946cb3f1b"
+    },
+    {
+      "name": "vbmeta.img",
+      "size": 65536,
+      "sha256": "793591612aa80105c8c4bcb40c2190132f5c4651dcf4cedba21bd60fae13bca2"
+    },
+    {
+      "name": "vendor_boot.img",
+      "size": 201326592,
+      "sha256": "6d2a70c6cc3e28c56d48b45c39312804ffe613a8364632ac3e24fd06d93a0ad8"
+    },
+    {
+      "name": "recovery.img",
+      "size": 104857600,
+      "sha256": "0a57b10e40db55f80e265e1eee04ccc68cb50a0ab291d8b01ef2ce74647ae95a"
+    },
+    {
+      "name": "merge_rom.py",
+      "size": 2313,
+      "sha256": "d014ec34c37b871c954298cd38d1f5208047b5c324f35f3196e651c77ca07670"
+    },
+    {
+      "name": "merge-rom.cmd",
+      "size": 155,
+      "sha256": "166ba2312ce1e95f2a0101df4b29c211c4a314c15b1ad5d36178a323d0b5767a"
+    },
+    {
+      "name": "README_RELEASE.md",
+      "size": 2247,
+      "sha256": "409b26828bea2c82a5c1a7e50319d8d9f888b517cb91cc8cf094c5fd3aa655d9"
+    },
+    {
+      "name": "MUST_Jank_Monitor_PC_20261018.zip",
+      "size": 54310,
+      "sha256": "bb0b08a5f981e3972f9205dd6b3b92c37a2bf00128217d50cc77130124462471"
+    }
+  ]
+}

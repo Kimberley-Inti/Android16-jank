@@ -1,0 +1,353 @@
+diff --git a/services/surfaceflinger/Scheduler/FrameTimeline.cpp b/services/surfaceflinger/Scheduler/FrameTimeline.cpp
+index 114c76d9e7..2e88b061da 100644
+--- a/services/surfaceflinger/Scheduler/FrameTimeline.cpp
++++ b/services/surfaceflinger/Scheduler/FrameTimeline.cpp
+@@ -22,6 +22,7 @@
+ #include <common/FlagManager.h>
+ #include <common/trace.h>
+ #include <utils/Log.h>
++#include <android/log.h>
+ 
+ #include <chrono>
+ #include <cinttypes>
+@@ -439,6 +440,14 @@ std::optional<int32_t> SurfaceFrame::getJankType() const {
+     return mJankType;
+ }
+ 
++std::optional<int32_t> SurfaceFrame::getMustJankType() const {
++    std::scoped_lock lock(mMutex);
++    if (mPredictionState != PredictionState::Valid) return std::nullopt;
++    if (mPresentState == PresentState::Dropped) return JankType::Dropped;
++    if (mActuals.presentTime == 0) return std::nullopt;
++    return mJankType;
++}
++
+ std::optional<JankSeverityType> SurfaceFrame::getJankSeverityType() const {
+     std::scoped_lock lock(mMutex);
+     if (mActuals.presentTime == 0) {
+@@ -1525,6 +1534,7 @@ void FrameTimeline::flushPendingPresentFences() {
+         const nsecs_t signalTime = Fence::SIGNAL_TIME_INVALID;
+         auto& displayFrame = pendingPresentFence.second;
+         displayFrame->onPresent(signalTime, mPreviousActualPresentTime);
++        collectMustJank(*displayFrame, monoBootOffset);
+         mPreviousPredictionPresentTime =
+                 displayFrame->trace(mSurfaceFlingerPid, monoBootOffset,
+                                     mPreviousPredictionPresentTime, mFilterFramesBeforeTraceStarts);
+@@ -1543,6 +1553,7 @@ void FrameTimeline::flushPendingPresentFences() {
+ 
+         auto& displayFrame = pendingPresentFence.second;
+         displayFrame->onPresent(signalTime, mPreviousActualPresentTime);
++        collectMustJank(*displayFrame, monoBootOffset);
+ 
+         mPreviousPredictionPresentTime =
+                 displayFrame->trace(mSurfaceFlingerPid, monoBootOffset,
+@@ -1554,6 +1565,60 @@ void FrameTimeline::flushPendingPresentFences() {
+     }
+ }
+ 
++void FrameTimeline::collectMustJank(const DisplayFrame& frame, nsecs_t monoBootOffset) {
++    if (mMustSession.empty()) return;
++    constexpr int32_t deadlineMask = JankType::AppDeadlineMissed |
++            JankType::SurfaceFlingerCpuDeadlineMissed |
++            JankType::SurfaceFlingerGpuDeadlineMissed;
++    const nsecs_t now = systemTime(SYSTEM_TIME_BOOTTIME);
++    for (const auto& surface : frame.getSurfaceFrames()) {
++        ++mMustTotalFrames;
++        const auto classification = surface->getMustJankType();
++        if (!classification) continue;
++        ++mMustValidFrames;
++        const int32_t type = *classification;
++        if (type == JankType::None || type == JankType::Unknown) continue;
++        ++mMustLabeledFrames;
++        if (type & deadlineMask) ++mMustJankyFrames;
++        const auto predicted = surface->getPredictions();
++        const auto actual = surface->getActuals();
++        const nsecs_t expected = predicted.presentTime > 0
++                ? predicted.presentTime + monoBootOffset : 0;
++        const nsecs_t presented = actual.presentTime > 0
++                ? actual.presentTime + monoBootOffset : 0;
++        const nsecs_t timestamp = presented > 0 ? presented : now;
++        // Layer names can contain whitespace; quote and escape for key=value parsing.
++        std::string layer = surface->getLayerName();
++        for (char& ch : layer) {
++            if (ch == '"' || ch == '\\' || ch == '\n' || ch == '\r') ch = '_';
++        }
++        __android_log_print(ANDROID_LOG_INFO, "MUST_JANK",
++                "session=%s event_id=%" PRIu64 " ts_ns=%" PRId64
++                " pid=%d uid=%u layer_id=%d layer=\"%s\""
++                " surface_frame_token=%" PRId64 " display_frame_token=%" PRId64
++                " input_event_id=%d expected_present_ns=%" PRId64
++                " actual_present_ns=%" PRId64 " delay_ns=%" PRId64
++                " jank_type=%d deadline_jank=%d severity=%d refresh_rate=%.2f",
++                mMustSession.c_str(), ++mMustEventId, timestamp,
++                surface->getOwnerPid(), surface->getOwnerUid(), surface->getLayerId(),
++                layer.c_str(), surface->getToken(), frame.getToken(), surface->getInputEventId(),
++                expected, presented, expected && presented ? presented - expected : 0,
++                type, (type & deadlineMask) != 0,
++                static_cast<int>(surface->getJankSeverityType().value_or(JankSeverityType::Unknown)),
++                frame.getRefreshRate());
++    }
++    if (now - mMustLastStatsNs >= 5'000'000'000LL) {
++        mMustLastStatsNs = now;
++        __android_log_print(ANDROID_LOG_INFO, "MUST_JANK_STATS",
++                "session=%s ts_ns=%" PRId64 " total_frames=%" PRIu64
++                " valid_frames=%" PRIu64
++                " janky_frames=%" PRIu64 " labeled_frames=%" PRIu64
++                " deadline_source=FrameTimeline",
++                mMustSession.c_str(), now, mMustTotalFrames, mMustValidFrames, mMustJankyFrames,
++                mMustLabeledFrames);
++    }
++}
++
+ void FrameTimeline::finalizeCurrentDisplayFrame() {
+     while (mDisplayFrames.size() >= mMaxDisplayFrames) {
+         // We maintain only a fixed number of frames' data. Pop older frames
+@@ -1677,5 +1742,26 @@ void FrameTimeline::reset() {
+     setMaxDisplayFrames(kDefaultMaxDisplayFrames);
+ }
+ 
++void FrameTimeline::setMustJankSession(const std::string& session) {
++    std::scoped_lock lock(mMutex);
++    mMustSession = session;
++    mMustTotalFrames = 0;
++    mMustValidFrames = 0;
++    mMustJankyFrames = 0;
++    mMustLabeledFrames = 0;
++    mMustEventId = 0;
++    mMustLastStatsNs = systemTime(SYSTEM_TIME_BOOTTIME);
++}
++
++std::string FrameTimeline::getMustJankStats() const {
++    std::scoped_lock lock(mMutex);
++    return base::StringPrintf("session=%s total_frames=%" PRIu64
++                              " valid_frames=%" PRIu64 " janky_frames=%" PRIu64
++                              " labeled_frames=%" PRIu64,
++                              mMustSession.c_str(), mMustTotalFrames, mMustValidFrames,
++                              mMustJankyFrames,
++                              mMustLabeledFrames);
++}
++
+ } // namespace impl
+ } // namespace android::scheduler
+diff --git a/services/surfaceflinger/Scheduler/FrameTimeline.h b/services/surfaceflinger/Scheduler/FrameTimeline.h
+index 8507594975..e1abcc3d8e 100644
+--- a/services/surfaceflinger/Scheduler/FrameTimeline.h
++++ b/services/surfaceflinger/Scheduler/FrameTimeline.h
+@@ -177,6 +177,8 @@ public:
+     // Returns std::nullopt if the frame hasn't been classified yet.
+     // Used by both SF and FrameTimeline.
+     std::optional<int32_t> getJankType() const;
++    // One-lock classification snapshot for the optional MUST monitor hot path.
++    std::optional<int32_t> getMustJankType() const;
+     std::optional<JankSeverityType> getJankSeverityType() const;
+ 
+     // Functions called by SF
+@@ -235,6 +237,8 @@ public:
+     // Getter functions used only by FrameTimelineTests and SurfaceFrame internally
+     TimelineItem getActuals() const;
+     pid_t getOwnerPid() const { return mOwnerPid; };
++    uid_t getOwnerUid() const { return mOwnerUid; };
++    const std::string& getLayerName() const { return mLayerName; };
+     int32_t getLayerId() const { return mLayerId; };
+     PredictionState getPredictionState() const;
+     PresentState getPresentState() const;
+@@ -361,6 +365,9 @@ public:
+ 
+     // Restores the max number of display frames to default. Called by SF backdoor.
+     virtual void reset() = 0;
++    // Session control is called only by system_server through SurfaceFlinger's private backdoor.
++    virtual void setMustJankSession(const std::string&) {}
++    virtual std::string getMustJankStats() const { return "unavailable"; }
+ };
+ 
+ namespace impl {
+@@ -445,6 +452,8 @@ public:
+         FramePresentMetadata getFramePresentMetadata() const { return mFramePresentMetadata; };
+         FrameReadyMetadata getFrameReadyMetadata() const { return mFrameReadyMetadata; };
+         int32_t getJankType() const { return mJankType; }
++        int64_t getToken() const { return mToken; }
++        float getRefreshRate() const { return mRefreshRate.getValue(); }
+         JankSeverityType getJankSeverityType() const { return mJankSeverityType; }
+         const std::vector<std::shared_ptr<SurfaceFrame>>& getSurfaceFrames() const {
+             return mSurfaceFrames;
+@@ -521,6 +530,8 @@ public:
+     float computeFps(const std::unordered_set<int32_t>& layerIds) override;
+     void generateFrameStats(int32_t layer, size_t count, FrameStats* outStats) const override;
+     void reset() override;
++    void setMustJankSession(const std::string& session) override;
++    std::string getMustJankStats() const override;
+ 
+     // Sets up the perfetto tracing backend and data source.
+     void onBootFinished() override;
+@@ -535,6 +546,7 @@ private:
+     friend class android::scheduler::FrameTimelineTest;
+ 
+     void flushPendingPresentFences() REQUIRES(mMutex);
++    void collectMustJank(const DisplayFrame& frame, nsecs_t monoBootOffset) REQUIRES(mMutex);
+     std::optional<size_t> getFirstSignalFenceIndex() const REQUIRES(mMutex);
+     void finalizeCurrentDisplayFrame() REQUIRES(mMutex);
+     void dumpAll(std::string& result);
+@@ -555,6 +567,13 @@ private:
+     const pid_t mSurfaceFlingerPid;
+     nsecs_t mPreviousActualPresentTime = 0;
+     nsecs_t mPreviousPredictionPresentTime = 0;
++    std::string mMustSession GUARDED_BY(mMutex);
++    uint64_t mMustTotalFrames GUARDED_BY(mMutex) = 0;
++    uint64_t mMustValidFrames GUARDED_BY(mMutex) = 0;
++    uint64_t mMustJankyFrames GUARDED_BY(mMutex) = 0;
++    uint64_t mMustLabeledFrames GUARDED_BY(mMutex) = 0;
++    uint64_t mMustEventId GUARDED_BY(mMutex) = 0;
++    nsecs_t mMustLastStatsNs GUARDED_BY(mMutex) = 0;
+     const JankClassificationThresholds mJankClassificationThresholds;
+     static constexpr uint32_t kDefaultMaxDisplayFrames = 64;
+     // The initial container size for the vector<SurfaceFrames> inside display frame. Although
+diff --git a/services/surfaceflinger/SurfaceFlinger.cpp b/services/surfaceflinger/SurfaceFlinger.cpp
+index 0ab1a9b812..edbd08ca24 100644
+--- a/services/surfaceflinger/SurfaceFlinger.cpp
++++ b/services/surfaceflinger/SurfaceFlinger.cpp
+@@ -4797,11 +4797,21 @@ void SurfaceFlinger::requestDisplayModes(std::vector<display::DisplayModeRequest
+ 
+     SFTRACE_CALL();
+ 
+-    // If this is called from the main thread mStateLock must be locked before
+-    // Currently the only way to call this function from the main thread is from
+-    // Scheduler::chooseRefreshRateForContent
++    if (std::this_thread::get_id() != mMainThreadId) {
++        // An idle timer callback must not wait for mStateLock: the main thread can hold
++        // that lock while changing the pacesetter and joining the idle timer thread.
++        // Queue the request without waiting so the timer can finish before the main
++        // thread processes the mode change.
++        static_cast<void>(mScheduler->schedule(
++                [this, modeRequests = std::move(modeRequests)]() mutable {
++                    Mutex::Autolock lock(mStateLock);
++                    requestDisplayModes(std::move(modeRequests));
++                }));
++        return;
++    }
+ 
+-    ConditionalLock lock(mStateLock, std::this_thread::get_id() != mMainThreadId);
++    // Main-thread callers (including the queued task above) hold mStateLock.
++    ftl::FakeGuard guard(mStateLock);
+ 
+     for (auto& request : modeRequests) {
+         const auto& modePtr = request.mode.modePtr;
+@@ -7117,9 +7127,9 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
+         code == IBinder::SYSPROPS_TRANSACTION) {
+         return OK;
+     }
+-    // Numbers from 1000 to 1047 are currently used for backdoors. The code
++    // Numbers from 1000 to 1050 are currently used for backdoors. The code
+     // in onTransact verifies that the user is root, and has access to use SF.
+-    if (code >= 1000 && code <= 1047) {
++    if (code >= 1000 && code <= 1050) {
+         ALOGV("Accessing SurfaceFlinger through backdoor code: %u", code);
+         return OK;
+     }
+@@ -7673,6 +7683,21 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
+                                                      Duration::fromNs(appDurationNs));
+                 return NO_ERROR;
+             }
++            case 1050: { // MUST monitor session control, system UID only.
++                if (uid != AID_SYSTEM) return PERMISSION_DENIED;
++                const int32_t op = data.readInt32();
++                if (op == 1) {
++                    const std::string session = String8(data.readString16()).c_str();
++                    if (session.empty() || session.size() > 96) return BAD_VALUE;
++                    mFrameTimeline->setMustJankSession(session);
++                } else if (op == 0) {
++                    mFrameTimeline->setMustJankSession("");
++                } else if (op != 2) {
++                    return BAD_VALUE;
++                }
++                reply->writeString16(String16(mFrameTimeline->getMustJankStats().c_str()));
++                return NO_ERROR;
++            }
+         }
+     }
+     return err;
+diff --git a/services/surfaceflinger/tests/unittests/SurfaceFlinger_DisplayModeSwitching.cpp b/services/surfaceflinger/tests/unittests/SurfaceFlinger_DisplayModeSwitching.cpp
+index 40a4dd70e8..3257799f7f 100644
+--- a/services/surfaceflinger/tests/unittests/SurfaceFlinger_DisplayModeSwitching.cpp
++++ b/services/surfaceflinger/tests/unittests/SurfaceFlinger_DisplayModeSwitching.cpp
+@@ -26,6 +26,9 @@
+ #include <ftl/fake_guard.h>
+ #include <scheduler/Fps.h>
+ 
++#include <future>
++#include <thread>
++
+ using namespace com::android::graphics::surfaceflinger;
+ 
+ #define EXPECT_SET_ACTIVE_CONFIG(displayId, modeId)                                 \
+@@ -312,6 +315,42 @@ void DisplayModeSwitchingTest::setupScheduler(
+                             TestableSurfaceFlinger::SchedulerCallbackImpl::kNoOp);
+ }
+ 
++TEST_P(DisplayModeSwitchingTest, timerModeRequestDoesNotWaitForMainThreadStateLock) {
++    mFlinger.mutableMainThreadId() = std::this_thread::get_id();
++
++    sp<MessageHandler> pendingRequest;
++    EXPECT_CALL(*mFlinger.scheduler(), postMessage(_))
++            .WillOnce([&](sp<MessageHandler>&& handler) { pendingRequest = std::move(handler); });
++
++    std::promise<void> returned;
++    auto completion = returned.get_future();
++    std::future_status status;
++    std::thread timer;
++    {
++        // Reproduce the lock held by commit/finalizeDisplayModeChange. A timer must
++        // finish while this lock is held, otherwise stopIdleTimer cannot join it.
++        Mutex::Autolock lock(mFlinger.mutableStateLock());
++        timer = std::thread([&] {
++            mFlinger.requestDisplayModes({});
++            returned.set_value();
++        });
++        status = completion.wait_for(std::chrono::seconds(2));
++        // Release the lock before joining even on failure, so the old synchronous
++        // implementation fails the assertion instead of hanging the test process.
++    }
++    timer.join();
++    EXPECT_EQ(status, std::future_status::ready);
++    ASSERT_NE(pendingRequest, nullptr);
++    pendingRequest->handleMessage(Message());
++}
++
++TEST_P(DisplayModeSwitchingTest, mainThreadModeRequestDoesNotRelockStateLock) {
++    mFlinger.mutableMainThreadId() = std::this_thread::get_id();
++    EXPECT_CALL(*mFlinger.scheduler(), postMessage(_)).Times(0);
++    Mutex::Autolock lock(mFlinger.mutableStateLock());
++    mFlinger.requestDisplayModes({});
++}
++
+ TEST_P(DisplayModeSwitchingTest, changeRefreshRateWithRefreshRequired) {
+     EXPECT_NO_FATAL_FAILURE(setupChangeRefreshRateTests());
+ 
+diff --git a/services/surfaceflinger/tests/unittests/TestableSurfaceFlinger.h b/services/surfaceflinger/tests/unittests/TestableSurfaceFlinger.h
+index 181d135a2d..e0a34edee5 100644
+--- a/services/surfaceflinger/tests/unittests/TestableSurfaceFlinger.h
++++ b/services/surfaceflinger/tests/unittests/TestableSurfaceFlinger.h
+@@ -274,6 +274,10 @@ public:
+ 
+     auto& mutableStateLock() { return mFlinger->mStateLock; }
+ 
++    void requestDisplayModes(std::vector<display::DisplayModeRequest> requests) {
++        mFlinger->requestDisplayModes(std::move(requests));
++    }
++
+     compositionengine::OutputLayer* findOutputLayerForDisplay(
+             uint32_t layerId, const sp<const DisplayDevice>& display) {
+         ftl::FakeGuard guard(kMainThreadContext);
+@@ -379,9 +383,11 @@ public:
+ 
+     auto acquireVirtualDisplay(ui::Size resolution, ui::PixelFormat format,
+                                const std::string& uniqueId,
+-                               compositionengine::DisplayCreationArgsBuilder& builder) {
++                               compositionengine::DisplayCreationArgsBuilder& builder,
++                               bool canAllocateHwcDisplayIdForVDS = true) {
+         ftl::FakeGuard guard(mFlinger->mStateLock);
+-        return mFlinger->acquireVirtualDisplay(resolution, format, uniqueId, builder);
++        return mFlinger->acquireVirtualDisplay(resolution, format, uniqueId, builder,
++                                              canAllocateHwcDisplayIdForVDS);
+     }
+ 
+     auto destroyVirtualDisplay(const sp<IBinder>& displayToken) {

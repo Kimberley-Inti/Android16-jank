@@ -1,0 +1,27 @@
+test_binding_replays_only_the_requested_session (__main__.CollectorSemanticsTest.test_binding_replays_only_the_requested_session) ... ok
+test_foreign_sessions_and_repeated_ids_are_excluded (__main__.CollectorSemanticsTest.test_foreign_sessions_and_repeated_ids_are_excluded) ... ok
+test_global_stats_stay_distinct_and_are_saved (__main__.CollectorSemanticsTest.test_global_stats_stay_distinct_and_are_saved) ... ok
+test_only_device_deadline_decisions_count (__main__.CollectorSemanticsTest.test_only_device_deadline_decisions_count) ... ok
+test_severity_is_saved_without_changing_device_fields (__main__.CollectorSemanticsTest.test_severity_is_saved_without_changing_device_fields) ... ok
+test_touch_scene_does_not_create_jank (__main__.CollectorSemanticsTest.test_touch_scene_does_not_create_jank) ... ok
+test_attach_shows_existing_device_total_immediately (__main__.GuiSemanticsTest.test_attach_shows_existing_device_total_immediately) ... ok
+test_changing_tabs_preserves_collection_and_statistics (__main__.GuiSemanticsTest.test_changing_tabs_preserves_collection_and_statistics) ... ok
+test_current_context_no_longer_shows_bare_unknown (__main__.GuiSemanticsTest.test_current_context_no_longer_shows_bare_unknown) ... ok
+test_default_filter_and_device_totals (__main__.GuiSemanticsTest.test_default_filter_and_device_totals) ... ok
+test_frequency_uses_collector_observation_and_freezes_at_stop (__main__.GuiSemanticsTest.test_frequency_uses_collector_observation_and_freezes_at_stop) ... ok
+test_gui_rankings_are_independent_and_descending (__main__.GuiSemanticsTest.test_gui_rankings_are_independent_and_descending) ... ok
+test_scene_and_missing_decision_are_not_deadline_events (__main__.GuiSemanticsTest.test_scene_and_missing_decision_are_not_deadline_events) ... ok
+test_severity_comparison_and_list_filter (__main__.GuiSemanticsTest.test_severity_comparison_and_list_filter) ... ok
+test_statistics_tab_uses_full_window_content (__main__.GuiSemanticsTest.test_statistics_tab_uses_full_window_content) ... ok
+test_boundaries_and_refresh_rate (__main__.SeveritySemanticsTest.test_boundaries_and_refresh_rate) ... ok
+test_export_ranks_each_grade_by_count (__main__.SeveritySemanticsTest.test_export_ranks_each_grade_by_count) ... ok
+test_non_deadline_and_mixed_buffer_stuffing (__main__.SeveritySemanticsTest.test_non_deadline_and_mixed_buffer_stuffing) ... ok
+test_timestamps_preferred_over_inconsistent_delay (__main__.SeveritySemanticsTest.test_timestamps_preferred_over_inconsistent_delay) ... ok
+test_type_frequency_uses_observation_time_and_preserves_overlap (__main__.SeveritySemanticsTest.test_type_frequency_uses_observation_time_and_preserves_overlap) ... ok
+test_unknown_scene_gets_evidence_qualified_label (__main__.SeveritySemanticsTest.test_unknown_scene_gets_evidence_qualified_label) ... ok
+test_unusable_telemetry_not_fabricated_as_low (__main__.SeveritySemanticsTest.test_unusable_telemetry_not_fabricated_as_low) ... ok
+
+----------------------------------------------------------------------
+Ran 22 tests in 0.454s
+
+OK

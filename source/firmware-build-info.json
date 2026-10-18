@@ -1,0 +1,16 @@
+{
+  "target": "lineage_salami-bp4a-userdebug",
+  "created_at": "2026-10-15T15:57:37.874497+08:00",
+  "build_incremental": "1792050526",
+  "new_surfaceflinger_build_id": "11adfd124413ca30da8670518ca6f79d",
+  "surfaceflinger_sha256": "5746cbe66d8a629730f2772ac308124942c1b857dc3a293750376d094867025d",
+  "source_sha256": {
+    "frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp": "1cefa334846aec471215ece09f0f9fec7fc42fac3931c8d22f032ac5f0ec6cae",
+    "frameworks/native/services/surfaceflinger/tests/unittests/SurfaceFlinger_DisplayModeSwitching.cpp": "ba2ef3f5940699df4bac26763661f7845f74ccf6303f178e7328e848653a7968",
+    "frameworks/native/services/surfaceflinger/tests/unittests/TestableSurfaceFlinger.h": "ac85522cd2bee0deb8d5f5dd8855af18bd6aa55397888f2d8359f2b2fc53d318"
+  },
+  "runtime_system_validation": "pending flashing and app/refresh-rate stress testing",
+  "firmware_date": "2026-10-15",
+  "pc_source_date": "2026-10-18",
+  "verification_scope": "Build provenance and existing 8 mocked native tests; Python validation is recorded separately. No claim of complete on-device stability validation."
+}

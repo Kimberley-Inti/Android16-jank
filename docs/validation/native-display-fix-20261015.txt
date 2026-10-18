@@ -1,0 +1,24 @@
+Note: Google Test filter = *timerModeRequestDoesNotWaitForMainThreadStateLock*:*mainThreadModeRequestDoesNotRelockStateLock*:*changeRefreshRateWithRefreshRequired*:*changeRefreshRateWithoutRefreshRequired*
+[==========] Running 8 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 8 tests from WithModesetFSM/DisplayModeSwitchingTest
+[ RUN      ] WithModesetFSM/DisplayModeSwitchingTest.timerModeRequestDoesNotWaitForMainThreadStateLock/0
+[       OK ] WithModesetFSM/DisplayModeSwitchingTest.timerModeRequestDoesNotWaitForMainThreadStateLock/0 (20 ms)
+[ RUN      ] WithModesetFSM/DisplayModeSwitchingTest.timerModeRequestDoesNotWaitForMainThreadStateLock/1
+[       OK ] WithModesetFSM/DisplayModeSwitchingTest.timerModeRequestDoesNotWaitForMainThreadStateLock/1 (5 ms)
+[ RUN      ] WithModesetFSM/DisplayModeSwitchingTest.mainThreadModeRequestDoesNotRelockStateLock/0
+[       OK ] WithModesetFSM/DisplayModeSwitchingTest.mainThreadModeRequestDoesNotRelockStateLock/0 (3 ms)
+[ RUN      ] WithModesetFSM/DisplayModeSwitchingTest.mainThreadModeRequestDoesNotRelockStateLock/1
+[       OK ] WithModesetFSM/DisplayModeSwitchingTest.mainThreadModeRequestDoesNotRelockStateLock/1 (2 ms)
+[ RUN      ] WithModesetFSM/DisplayModeSwitchingTest.changeRefreshRateWithRefreshRequired/0
+[       OK ] WithModesetFSM/DisplayModeSwitchingTest.changeRefreshRateWithRefreshRequired/0 (4 ms)
+[ RUN      ] WithModesetFSM/DisplayModeSwitchingTest.changeRefreshRateWithRefreshRequired/1
+[       OK ] WithModesetFSM/DisplayModeSwitchingTest.changeRefreshRateWithRefreshRequired/1 (3 ms)
+[ RUN      ] WithModesetFSM/DisplayModeSwitchingTest.changeRefreshRateWithoutRefreshRequired/0
+[       OK ] WithModesetFSM/DisplayModeSwitchingTest.changeRefreshRateWithoutRefreshRequired/0 (3 ms)
+[ RUN      ] WithModesetFSM/DisplayModeSwitchingTest.changeRefreshRateWithoutRefreshRequired/1
+[       OK ] WithModesetFSM/DisplayModeSwitchingTest.changeRefreshRateWithoutRefreshRequired/1 (4 ms)
+[----------] 8 tests from WithModesetFSM/DisplayModeSwitchingTest (48 ms total)
+[----------] Global test environment tear-down
+[==========] 8 tests from 1 test suite ran. (48 ms total)
+[  PASSED  ] 8 tests.

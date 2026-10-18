@@ -1,0 +1,46 @@
+diff --git a/build/soong/service_fuzzer_bindings.go b/build/soong/service_fuzzer_bindings.go
+index cb5e61fa8..9f21404fe 100644
+--- a/build/soong/service_fuzzer_bindings.go
++++ b/build/soong/service_fuzzer_bindings.go
+@@ -23,6 +23,7 @@ var EXCEPTION_NO_FUZZER = []string{}
+ 
+ var (
+ 	ServiceFuzzerBindings = map[string][]string{
++		"must_jank": EXCEPTION_NO_FUZZER, // Java-only, shell/system restricted.
+ 		"android.hardware.audio.core.IConfig/default":                                        EXCEPTION_NO_FUZZER,
+ 		"android.hardware.audio.core.IModule/default":                                        EXCEPTION_NO_FUZZER,
+ 		"android.hardware.audio.core.IModule/a2dp":                                           EXCEPTION_NO_FUZZER,
+diff --git a/private/service.te b/private/service.te
+index 101a9695a..9a92f2bf8 100644
+--- a/private/service.te
++++ b/private/service.te
+@@ -1,4 +1,5 @@
+ type activity_structured_service,    system_api_service, system_server_service, service_manager_type;
++type must_jank_service, system_server_service, service_manager_type;
+ type ambient_context_service,        app_api_service, system_server_service, service_manager_type;
+ type authentication_policy_service,  app_api_service, system_api_service, system_server_service, service_manager_type;
+ 
+diff --git a/private/service_contexts b/private/service_contexts
+index 84304c065..ba6f6cd92 100644
+--- a/private/service_contexts
++++ b/private/service_contexts
+@@ -530,6 +530,7 @@ vold                                      u:object_r:vold_service:s0
+ vpn_management                            u:object_r:vpn_management_service:s0
+ vrmanager                                 u:object_r:vr_manager_service:s0
+ wallpaper                                 u:object_r:wallpaper_service:s0
++must_jank                                 u:object_r:must_jank_service:s0
+ wallpaper_effects_generation              u:object_r:wallpaper_effects_generation_service:s0
+ wearable_sensing                          u:object_r:wearable_sensing_service:s0
+ webviewupdate                             u:object_r:webviewupdate_service:s0
+diff --git a/private/shell.te b/private/shell.te
+index 1a7e30aec..983ef3890 100644
+--- a/private/shell.te
++++ b/private/shell.te
+@@ -364,6 +364,7 @@ userdebug_or_eng(`
+ 
+ # allow shell access to services
+ allow shell servicemanager:service_manager list;
++allow shell must_jank_service:service_manager find;
+ # don't allow shell to access GateKeeper service
+ # TODO: why is this so broad? Tightening candidate? It needs at list:
+ # - dumpstate_service (so it can receive dumpstate progress updates)

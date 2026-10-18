@@ -1,0 +1,17 @@
+{
+  "frameworks/base": {
+    "upstream_base": "c8e9a4a21efb16c923371a740b9c1c755d17ebb2",
+    "local_snapshot_commit": "5bc2476be8311812113ae0f4dd5758aab81ddaa8",
+    "patch": "patches/must-monitor/frameworks__base.patch"
+  },
+  "frameworks/native": {
+    "upstream_base": "9568531f9be7ae65f260699811f32ec4e461de6e",
+    "local_snapshot_commit": "4bc6e40a94782fb0aa2eeea1b461da4645d5b55d",
+    "patch": "patches/must-monitor/frameworks__native.patch"
+  },
+  "system/sepolicy": {
+    "upstream_base": "885cc500f6078a766d1f6def5ce4c06c55841773",
+    "local_snapshot_commit": "e572dd76087634eaa9f34974299478f958567005",
+    "patch": "patches/must-monitor/system__sepolicy.patch"
+  }
+}

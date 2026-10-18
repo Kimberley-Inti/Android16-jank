@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+**/sessions/
+tools/**/build*/
+tools/**/dist/
+*.exe
+*.img
+*.zip
+*.zip.part.*
+*.partial
+.env
+*.pem
